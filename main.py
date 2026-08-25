@@ -22,6 +22,7 @@ if __name__ == "__main__":
         12348: "julabo_presto_a40",
         12349: "lambda_instruments_omnicoll",
         12350: "airvalve",
+        12351: "bronkhorst_mfc",  # NEU: Dummy fuer backend/drivers/bronkhorst_mfc.py
     }
 
     for port, device in ports.items():
