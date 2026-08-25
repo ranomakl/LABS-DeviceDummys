@@ -24,11 +24,20 @@ if __name__ == "__main__":
         12350: "airvalve",
         12351: "bronkhorst_mfc",  # NEU: Dummy fuer backend/drivers/bronkhorst_mfc.py
         12352: "longer_wt600",  # NEU: Dummy fuer backend/drivers/longer_wt600.py
+        12353: "endress_hauser_liquiline",  # NEU: Dummy fuer backend/drivers/endress_hauser_liquiline.py
+        12354: "inficon_microgc_fusion",  # NEU: Dummy fuer backend/drivers/inficon_microgc_fusion.py (HTTP, s.u.)
     }
 
     for port, device in ports.items():
         device_module = importlib.import_module(device)
-        factory = ServerFactory.forProtocol(device_module.DeviceProtocol)
+        # Die meisten Dummys simulieren einen seriellen Port (rohes TCP + eigene DeviceProtocol-
+        # Klasse). inficon_microgc_fusion.py simuliert stattdessen einen HTTP-Server und stellt
+        # dafuer bereits eine fertige twisted.web.server.Site als Modul-Attribut `Factory` bereit -
+        # diese direkt verwenden statt sie (falsch) als serielles DeviceProtocol zu behandeln.
+        try:
+            factory = device_module.Factory
+        except AttributeError:
+            factory = ServerFactory.forProtocol(device_module.DeviceProtocol)
         reactor.listenTCP(port, factory)
 
     reactor.run()
