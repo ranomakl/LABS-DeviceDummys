@@ -1,7 +1,21 @@
+import os
 import re
 
 from twisted.protocols.basic import LineOnlyReceiver
 from twisted.logger import Logger
+
+# STUMM-SCHALTER (08.10.2026, fuer den Test des Fehlerpfads im Backend, s. LABS-Backend/docs/
+# test_fehlerpfad_dummys.md): Liegt im Dummy-Verzeichnis eine Datei namens STUMM (Inhalt egal),
+# nimmt jeder Dummy Befehle an, ANTWORTET ABER NICHT - wie ein Geraet, das haengt, bei offener
+# Verbindung. Datei loeschen -> Dummy antwortet wieder. Funktioniert auch unter Windows (kein
+# SIGSTOP noetig). Optional: Datei STUMM_<modulname> (z.B. STUMM_bronkhorst_mfc) stummt nur
+# diesen einen Dummy.
+_HIER = os.path.dirname(os.path.abspath(__file__))
+
+
+def ist_stumm(modulname: str) -> bool:
+    return (os.path.exists(os.path.join(_HIER, "STUMM"))
+            or os.path.exists(os.path.join(_HIER, f"STUMM_{modulname}")))
 
 
 class BaseDummyProtocol(LineOnlyReceiver):
@@ -16,6 +30,9 @@ class BaseDummyProtocol(LineOnlyReceiver):
 
     def lineReceived(self, line):
         self.log.info(f"received: {line}")
+        if ist_stumm(type(self).__module__):
+            self.log.warn(f"STUMM-Datei vorhanden - KEINE Antwort auf: {line}")
+            return
 
         def get_match(data, dictionary):
             for key, value in dictionary.items():

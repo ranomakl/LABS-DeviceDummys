@@ -33,6 +33,10 @@ class DeviceProtocol(BaseDummyProtocol):
             r":(?P<len>[0-9A-F]{2})(?P<node>[0-9A-F]{2})0401210120": (self.read_measure, ""),
             # READ_COUNTER-Anfrage: :LEN NODE 04 (Echo 6841)(Actual 6841)
             r":(?P<len>[0-9A-F]{2})(?P<node>[0-9A-F]{2})0468416841": (self.read_counter, ""),
+            # READ_SETPOINT-Anfrage (neu 08.10.2026): :LEN NODE 04 (Echo 0121)(Setpoint 0121)
+            r":(?P<len>[0-9A-F]{2})(?P<node>[0-9A-F]{2})0401210121": (self.read_setpoint, ""),
+            # RESET_COUNTER (neu 08.10.2026): :05 NODE 01 7308 01  (Prozess 115, Param 8, Wert 1)
+            r":(?P<len>[0-9A-F]{2})(?P<node>[0-9A-F]{2})017308(?P<value>[0-9A-F]{2})": (self.reset_counter, ""),
         }
 
     @staticmethod
@@ -51,6 +55,15 @@ class DeviceProtocol(BaseDummyProtocol):
         self._update_counter()
         # Antwort: Befehl 02 + geechotes Prozess/Parameter-Paar (0121, s. Treiber) + Wert
         return self._build_reply(match.group("node"), f"020121{self.setpoint_raw:04X}")
+
+    def read_setpoint(self, match: re.Match):
+        return self._build_reply(match.group("node"), f"020121{self.setpoint_raw:04X}")
+
+    def reset_counter(self, match: re.Match):
+        if int(match.group("value"), 16) == 1:
+            self._update_counter()
+            self.counter = 0.0
+        return self._build_reply(match.group("node"), "000004")
 
     def read_counter(self, match: re.Match):
         self._update_counter()
