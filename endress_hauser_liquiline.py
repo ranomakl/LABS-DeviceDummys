@@ -1,62 +1,95 @@
-# Dummy fuer backend/drivers/endress_hauser_liquiline.py (Endress+Hauser Liquiline CM442/CM448,
-# Modbus ASCII, siehe Treiberkommentar dort fuer die RTU/ASCII-Entscheidung und die
-# Frame-/Registerverifikation gegen docs/handbuch_liquiline_modbus.pdf).
+# Dummy fuer backend/drivers/endress_hauser_liquiline.py (Endress+Hauser Liquiline CM442/CM448),
+# Modbus RTU (seit 12.10.2026 - der Treiber sprach vorher ASCII, das echte Geraet antwortete darauf
+# nie; Begruendung und Pruefvektoren im Treiberkopf).
 #
-# Modbus-ASCII-Frames sind text-delimitiert (":" ... CRLF) und passen deshalb - anders als
-# longer_wt600.py - direkt in das bestehende BaseDummyProtocol (LineOnlyReceiver).
+# RTU-Frames sind binaer und laengenbasiert, deshalb - wie bei longer_wt600.py - ein eigenes
+# twisted.internet.protocol.Protocol statt BaseDummyProtocol (LineOnlyReceiver). Der STUMM-Schalter
+# aus base.py (Datei STUMM bzw. STUMM_endress_hauser_liquiline) wird respektiert.
 #
-# Simuliert: FC03 Read Holding Register fuer einen vollstaendigen AI-Geraetevariablen-Block
-# (Value/Status/Unit, 4 Register = 8 Byte, s. Treiberkommentar). Liefert fuer die drei in
-# config.yml vorgesehenen Register (0=pH, 4=Leitfaehigkeit, 8=Temperatur) plausible, leicht
-# schwankende Messwerte; fuer jedes andere angefragte Register wird status=2 (Bad) mit Wert 0.0
-# geliefert (simuliert "kein Sensor auf diesem AI-Slot konfiguriert"). Kein Schreibzugriff, da der
-# Treiber reiner Lesezugriff ist.
+# Simuliert: FC03 Read Holding Register fuer einen vollstaendigen AI-Geraetevariablen-Block (Value/
+# Status/Unit, 4 Register = 8 Byte). Fuer die drei Register aus config.dummy.yml (0 = pH Kanal 1,
+# 4 = pH Kanal 2, 8 = Temperatur) plausible, leicht schwankende Werte mit Status 0 (Good); fuer jedes
+# andere Register Status 3 (Not assigned) mit Wert 0.0 - wie das echte Geraet ohne AI-Mapping.
+# Andere Anzahlen als 4 Register oder andere Funktionscodes -> Modbus-Exception (0x02 bzw. 0x01).
+# Busadresse 1 (config.dummy.yml); Anfragen an andere Adressen werden ignoriert (wie auf einem Bus).
 
 import math
-import re
 import struct
 import time
 
-from base import BaseDummyProtocol
+from twisted.internet.protocol import Protocol
+from twisted.logger import Logger
 
+from base import ist_stumm
 
-def _lrc(data: bytes) -> int:
-    return (-sum(data)) & 0xFF
+BUS_ADDRESS = 1
+FC_READ_HOLDING_REGISTERS = 0x03
 
-
-def _encode_float_wire(value: float, byte_order: str = "1-0-3-2") -> bytes:
-    std_bytes = struct.pack(">f", value)  # Byte3,Byte2,Byte1,Byte0
-    byte_of = {3: std_bytes[0], 2: std_bytes[1], 1: std_bytes[2], 0: std_bytes[3]}
-    order = [int(x) for x in byte_order.split("-")]
-    return bytes(byte_of[i] for i in order)
-
-
-# register -> (Basiswert, Schwankung, Unit-Code) - Register wie im mitgelieferten config.yml-Beispiel
+# register -> (Basiswert, Schwankung, Unit-Code)   Unit-Codes Handbuch 7.1: 53 = pH, 89 = degC
 SIMULATED_CHANNELS = {
-    0: (7.00, 0.05, 53),    # pH, Unit-Code 53 = "pH" (Handbuch Abschnitt 7.1)
-    4: (520.0, 5.0, 71),    # Leitfaehigkeit, Unit-Code 71 = "uS/cm"
-    8: (23.5, 0.2, 89),     # Temperatur, Unit-Code 89 = "degC"
+    0: (7.00, 0.05, 53),
+    4: (7.20, 0.05, 53),
+    8: (23.5, 0.2, 89),
 }
 
 
-class DeviceProtocol(BaseDummyProtocol):
-    delimiter = b"\r\n"
-    log_name = "Endress+Hauser Liquiline CM44x (dummy)"
+def crc16(data: bytes) -> bytes:
+    crc = 0xFFFF
+    for byte in data:
+        crc ^= byte
+        for _ in range(8):
+            crc = (crc >> 1) ^ 0xA001 if crc & 1 else crc >> 1
+    return crc.to_bytes(2, "little")
+
+
+def encode_float_wire(value: float, byte_order: str = "1-0-3-2") -> bytes:
+    std_bytes = struct.pack(">f", value)  # Byte3,Byte2,Byte1,Byte0
+    byte_of = {3: std_bytes[0], 2: std_bytes[1], 1: std_bytes[2], 0: std_bytes[3]}
+    return bytes(byte_of[int(i)] for i in byte_order.split("-"))
+
+
+def ai_block(register: int) -> bytes:
+    if register in SIMULATED_CHANNELS:
+        base_value, jitter, unit = SIMULATED_CHANNELS[register]
+        value, status = base_value + jitter * math.sin(time.time()), 0
+    else:
+        value, status, unit = 0.0, 3, 0
+    return encode_float_wire(value) + bytes([0, status, 0, unit])
+
+
+class DeviceProtocol(Protocol):
+    log_name = "Endress+Hauser Liquiline CM44x (dummy, RTU)"
 
     def __init__(self):
-        super().__init__()
-        self.bus_address = 1  # muss zur config.yml-`bus_address` des Treibers passen
-        self.replies = {
-            r":(?P<address>[0-9A-Fa-f]{2})03(?P<register>[0-9A-Fa-f]{4})0004(?P<lrc>[0-9A-Fa-f]{2})":
-                (self.read_ai_block, ""),
-        }
+        self.log = Logger(namespace=self.log_name)
+        self._buffer = bytearray()
 
-    def read_ai_block(self, match: re.Match) -> str:
-        register = int(match.group("register"), 16)
-        base_value, jitter, unit = SIMULATED_CHANNELS.get(register, (0.0, 0.0, 0))
-        status = 0 if register in SIMULATED_CHANNELS else 2  # 2 = Bad ("nicht konfiguriert")
-        value = base_value + jitter * math.sin(time.time())
+    def dataReceived(self, data):
+        self._buffer.extend(data)
+        while len(self._buffer) >= 8:                 # FC03-Anfrage ist immer 8 Byte
+            if self._buffer[0] != BUS_ADDRESS:
+                del self._buffer[0]                   # nicht fuer uns / Rauschen
+                continue
+            request = bytes(self._buffer[:8]); del self._buffer[:8]
+            self.handle_request(request)
 
-        data = _encode_float_wire(value) + bytes([0, status, 0, unit])
-        body = bytes([self.bus_address, 0x03, len(data)]) + data
-        return f":{body.hex().upper()}{_lrc(body):02X}"
+    def handle_request(self, request: bytes):
+        self.log.info(f"received: {request.hex(' ').upper()}")
+        if crc16(request[:-2]) != request[-2:]:
+            self.log.warn("CRC falsch - keine Antwort (wie ein echtes Geraet)")
+            return
+        if ist_stumm(type(self).__module__):
+            self.log.warn(f"STUMM-Datei vorhanden - KEINE Antwort auf: {request.hex(' ').upper()}")
+            return
+        function = request[1]
+        start, quantity = int.from_bytes(request[2:4], "big"), int.from_bytes(request[4:6], "big")
+        if function != FC_READ_HOLDING_REGISTERS:
+            body = bytes([BUS_ADDRESS, function | 0x80, 0x01])
+        elif quantity != 4:
+            body = bytes([BUS_ADDRESS, function | 0x80, 0x02])
+        else:
+            data = ai_block(start)
+            body = bytes([BUS_ADDRESS, function, len(data)]) + data
+        reply = body + crc16(body)
+        self.transport.write(reply)
+        self.log.info(f"answered: {reply.hex(' ').upper()}")
