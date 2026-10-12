@@ -10,7 +10,8 @@
 # Status/Unit, 4 Register = 8 Byte). Fuer die drei Register aus config.dummy.yml (0 = pH Kanal 1,
 # 4 = pH Kanal 2, 8 = Temperatur) plausible, leicht schwankende Werte mit Status 0 (Good); fuer jedes
 # andere Register Status 3 (Not assigned) mit Wert 0.0 - wie das echte Geraet ohne AI-Mapping.
-# Andere Anzahlen als 4 Register oder andere Funktionscodes -> Modbus-Exception (0x02 bzw. 0x01).
+# Anzahl Register muss ein Vielfaches von 4 sein (ganze AI-Bloecke, mehrere je Anfrage erlaubt),
+# sonst Modbus-Exception 0x02; andere Funktionscodes -> Exception 0x01.
 # Busadresse 1 (config.dummy.yml); Anfragen an andere Adressen werden ignoriert (wie auf einem Bus).
 
 import math
@@ -85,10 +86,10 @@ class DeviceProtocol(Protocol):
         start, quantity = int.from_bytes(request[2:4], "big"), int.from_bytes(request[4:6], "big")
         if function != FC_READ_HOLDING_REGISTERS:
             body = bytes([BUS_ADDRESS, function | 0x80, 0x01])
-        elif quantity != 4:
-            body = bytes([BUS_ADDRESS, function | 0x80, 0x02])
+        elif quantity == 0 or quantity % 4 != 0 or quantity > 125:
+            body = bytes([BUS_ADDRESS, function | 0x80, 0x02])     # nur ganze AI-Bloecke, max. 125 Register
         else:
-            data = ai_block(start)
+            data = b"".join(ai_block(start + 4 * i) for i in range(quantity // 4))   # mehrere Bloecke je Anfrage
             body = bytes([BUS_ADDRESS, function, len(data)]) + data
         reply = body + crc16(body)
         self.transport.write(reply)
