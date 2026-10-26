@@ -26,6 +26,11 @@ if __name__ == "__main__":
         12352: "longer_wt600",  # NEU: Dummy fuer backend/drivers/longer_wt600.py
         12353: "endress_hauser_liquiline",  # NEU: Dummy fuer backend/drivers/endress_hauser_liquiline.py
         12354: "inficon_microgc_fusion",  # NEU: Dummy fuer backend/drivers/inficon_microgc_fusion.py (HTTP, s.u.)
+        # 26.10.2026 drei Zellen parallel: zweites/drittes Netzteil und zweiter/dritter MFC (config.dummy.yml psu2/psu3, mfc2/mfc3)
+        12356: "bronkhorst_mfc",
+        12357: "bronkhorst_mfc",
+        12361: "tdk_lambda_zplus",
+        12362: "tdk_lambda_zplus",
     }
 
     for port, device in ports.items():
