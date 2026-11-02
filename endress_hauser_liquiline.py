@@ -31,6 +31,9 @@ SIMULATED_CHANNELS = {
     0: (7.00, 0.05, 53),
     4: (7.20, 0.05, 53),
     8: (23.5, 0.2, 89),
+    12: (7.40, 0.05, 53),   # AI4 ph_z2 (zweiter pH-Sensor / Zelle 2)
+    16: (7.60, 0.05, 53),   # AI5 ph_z3
+    20: (24.0, 0.2, 89),    # AI6 temperature_z2 (02.11.2026 Zwei-Kammer)
 }
 
 
