@@ -32,6 +32,9 @@ if __name__ == "__main__":
         12357: "bronkhorst_mfc",
         12361: "tdk_lambda_zplus",
         12362: "tdk_lambda_zplus",
+        # 06.11.2026 Messstand II (config.messstand2.dummy.yml): Schlauchpumpe BT100-1F und ihr 16-Wege-Ventil
+        12363: "longer_bt100_1f",
+        12364: "knauer_azura_vu_4_1",
     }
 
     for port, device in ports.items():
